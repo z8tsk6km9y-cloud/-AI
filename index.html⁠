@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>収益化AIナビ</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 h-screen flex flex-col font-sans">
+
+  <!-- ヘッダー -->
+  <header class="bg-blue-600 text-white p-4 flex justify-between items-center shadow-md">
+    <h1 class="font-bold text-lg">💰 収益化AIナビ</h1>
+    <button onclick="clearHistory()" class="text-xs bg-blue-700 hover:bg-blue-800 px-3 py-1.5 rounded-lg border border-blue-500">
+      履歴消去
+    </button>
+  </header>
+
+  <!-- APIキー入力エリア（初期設定用） -->
+  <div id="api-key-container" class="bg-amber-50 border-b border-amber-200 p-3 text-xs text-amber-900 flex items-center justify-between">
+    <span>API Keyを入力してください:</span>
+    <input type="password" id="api-key-input" placeholder="Gemini API Key" class="border px-2 py-1 rounded w-1/2 text-black">
+    <button onclick="saveApiKey()" class="bg-amber-600 text-white px-3 py-1 rounded font-bold">保存</button>
+  </div>
+
+  <!-- チャットエリア -->
+  <main id="chat-box" class="flex-1 overflow-y-auto p-4 space-y-4">
+    <!-- メッセージがここに動的追加されます -->
+  </main>
+
+  <!-- 入力フォーム -->
+  <footer class="p-3 bg-white border-t flex gap-2 items-center">
+    <textarea id="user-input" rows="1" placeholder="例: 未経験から月3万円稼ぐ方法を教えて" 
+      class="flex-1 border rounded-xl p-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+    <button onclick="sendMessage()" class="bg-blue-600 text-white font-bold px-4 py-2.5 rounded-xl hover:bg-blue-700 text-sm">
+      送信
+    </button>
+  </footer>
+
+  <script>
+    const SYSTEM_INSTRUCTION = `あなたは「安全で再現性の高い副業・収益化の専門コンサルタントAI」です。
+ユーザーが「お金を稼ぐ方法」について質問した際、以下のルールを厳密に守って回答してください。
+1. 信頼性の徹底：詐欺的・高リスク（ギャンブル、怪しい情報商材等）は排除し、クラウドソーシング・スキル販売・不用品売買等の健全な手法のみ回答する。
+2. 初心者向け：専門用語は平易に噛み砕き、Step 1で「今日やるべき具体的な1行動」を示す。
+3. 構成：【概要】→【具体的なやり方】→【注意点・リスク】の順番で読みやすく解説する。`;
+
+    let chatHistory = JSON.parse(localStorage.getItem('income_ai_history') || '[]');
+    let apiKey = localStorage.getItem('gemini_api_key') || '';
+
+    window.onload = () => {
+      if (apiKey) document.getElementById('api-key-container').classList.add('hidden');
+      renderHistory();
+    };
+
+    function saveApiKey() {
+      const key = document.getElementById('api-key-input').value.trim();
+      if (key) {
+        localStorage.setItem('gemini_api_key', key);
+        apiKey = key;
+        document.getElementById('api-key-container').classList.add('hidden');
+        alert('API Keyを保存しました');
+      }
+    }
+
+    function renderHistory() {
+      const chatBox = document.getElementById('chat-box');
+      chatBox.innerHTML = '';
+      if (chatHistory.length === 0) {
+        chatBox.innerHTML = `<div class="text-center text-gray-400 text-sm mt-10">
+          「月1万円稼ぎたい」「スキル無しでできる副業は？」<br>など、気軽に質問してください。
+        </div>`;
+        return;
+      }
+      chatHistory.forEach(msg => {
+        appendMessageUI(msg.role === 'user' ? 'user' : 'bot', msg.parts[0].text);
+      });
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    function appendMessageUI(sender, text) {
+      const chatBox = document.getElementById('chat-box');
+      const div = document.createElement('div');
+      div.className = sender === 'user' ? 'flex justify-end' : 'flex justify-start';
+      
+      const bubble = document.createElement('div');
+      bubble.className = sender === 'user'
+        ? 'bg-blue-600 text-white rounded-2xl rounded-tr-none px-4 py-2.5 max-w-[85%] text-sm whitespace-pre-wrap'
+        : 'bg-white text-gray-800 border rounded-2xl rounded-tl-none px-4 py-2.5 max-w-[85%] text-sm whitespace-pre-wrap shadow-sm';
+      
+      bubble.textContent = text;
+      div.appendChild(bubble);
+      chatBox.appendChild(div);
+      chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+    async function sendMessage() {
+      const input = document.getElementById('user-input');
+      const text = input.value.trim();
+      if (!text) return;
+      if (!apiKey) {
+        alert('API Keyを設定してください');
+        return;
+      }
+
+      appendMessageUI('user', text);
+      chatHistory.push({ role: 'user', parts: [{ text: text }] });
+      input.value = '';
+
+      // ローディング表示
+      appendMessageUI('bot', '回答を作成中...');
+
+      try {
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+            contents: chatHistory
+          })
+        });
+
+        const data = await response.json();
+        // ローディング削除
+        document.getElementById('chat-box').lastChild.remove();
+
+        if (data.candidates && data.candidates[0].content.parts[0].text) {
+          const reply = data.candidates[0].content.parts[0].text;
+          appendMessageUI('bot', reply);
+          chatHistory.push({ role: 'model', parts: [{ text: reply }] });
+          localStorage.setItem('income_ai_history', JSON.stringify(chatHistory));
+        } else {
+          appendMessageUI('bot', 'エラーが発生しました。APIキーまたは入力内容を確認してください。');
+        }
+      } catch (err) {
+        document.getElementById('chat-box').lastChild.remove();
+        appendMessageUI('bot', '通信エラーが発生しました。');
+      }
+    }
+
+    function clearHistory() {
+      if (confirm('チャットログを消去しますか？')) {
+        chatHistory = [];
+        localStorage.removeItem('income_ai_history');
+        renderHistory();
+      }
+    }
+  </script>
+</body>
+</html>
